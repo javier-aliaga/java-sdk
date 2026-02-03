@@ -17,6 +17,7 @@ import io.dapr.workflows.Workflow;
 import io.dapr.workflows.WorkflowActivity;
 import io.dapr.workflows.runtime.WorkflowRuntime;
 import io.dapr.workflows.runtime.WorkflowRuntimeBuilder;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
@@ -48,7 +49,20 @@ public class DaprWorkflowsConfiguration implements ApplicationContextAware {
     for (Workflow workflow :  workflowBeans.values()) {
       LOGGER.info("Dapr Workflow: '{}' registered", workflow.getClass().getName());
 
-      workflowRuntimeBuilder.registerWorkflow(workflow);
+      if (StringUtils.isEmpty(workflow.getName())) {
+        workflowRuntimeBuilder.registerWorkflow(workflow);
+        continue;
+      }
+      
+      if (StringUtils.isEmpty(workflow.getVersion())) {
+        workflowRuntimeBuilder.registerWorkflow(workflow.getName(), workflow);
+        continue;
+      }
+      
+      workflowRuntimeBuilder.registerWorkflow(workflow.getName(),
+          workflow,
+          workflow.getVersion(),
+          workflow.isLatestVersion());
     }
 
     Map<String, WorkflowActivity> workflowActivitiesBeans = applicationContext.getBeansOfType(WorkflowActivity.class);

@@ -83,7 +83,7 @@ performs the following orchestration when a new workflow instance is created:
 Testing becomes a complex task when you are dealing with multiple Spring Boot applications. For testing this workflow, 
 we rely on [Testcontainers](https://testcontainers.com) to create the entire setup which enable us to run the workflow end to end.
 
-You can find the end-to-end test in the [`OrchestratorAppIT.java`](orchestrator/src/test/java/io/dapr/springboot/examples/orchestrator/OrchestratorAppIT.java) class inside the `orchestrator` application. 
+You can find the end-to-end test in the [`OrchestratorAppIT.java`](orchestrator/src/test/java/io/dapr/springboot/examples/orchestrator/OrchestratorAppIT.java) class inside the `orchestrator` application. inside the `orchestrator` application. 
 This test interact with the application REST endpoints to validate their correct execution. 
 
 But the magic behind the test can be located in the [`DaprTestContainersConfig.class`](orchestrator/src/test/java/io/dapr/springboot/examples/orchestrator/DaprTestContainersConfig.java) which defines the configuration for 

@@ -175,6 +175,19 @@ public class WorkflowRuntimeBuilder {
   /**
    * Registers a Workflow object.
    *
+   * @param <T>      any Workflow type
+   * @param name     the name of the workflow to register
+   * @param instance the workflow instance being registered
+   * @return the WorkflowRuntimeBuilder
+   */
+  public <T extends Workflow> WorkflowRuntimeBuilder registerWorkflow(String name, T instance) {
+    this.registerWorkflow(name, instance, null, null);
+    return this;
+  }
+
+  /**
+   * Registers a Workflow object.
+   *
    * @param <T>             any Workflow type
    * @param name            the name of the workflow to register
    * @param instance        the workflow instance being registered
