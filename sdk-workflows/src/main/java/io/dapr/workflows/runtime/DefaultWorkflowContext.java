@@ -168,6 +168,11 @@ public class DefaultWorkflowContext implements WorkflowContext {
   }
 
   @Override
+  public <V> Task<V> waitForAnyExternalEvent(Class<V> dataType, String... names) {
+    return this.innerContext.waitForAnyExternalEvent(dataType, names);
+  }
+
+  @Override
   public boolean isReplaying() {
     return this.innerContext.getIsReplaying();
   }

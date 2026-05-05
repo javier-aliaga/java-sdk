@@ -614,6 +614,20 @@ public interface TaskOrchestrationContext {
   }
 
   /**
+   * Waits for any of the named external events and returns a {@link Task} that completes when
+   * the first matching event is received.
+   *
+   * <p>When one event fires, pending subscriptions for the other names are automatically cleaned
+   * up so they don't accumulate across loop iterations.
+   *
+   * @param dataType the expected class type of the event data payload
+   * @param names    the case-insensitive event names to wait for
+   * @param <V>      the expected type of the event data payload
+   * @return a new {@link Task} that completes when any of the named events is received
+   */
+  <V> Task<V> waitForAnyExternalEvent(Class<V> dataType, String... names);
+
+  /**
    * Assigns a custom status value to the current orchestration.
    *
    * <p>The {@code customStatus} value is serialized and stored in orchestration state and will be made available to the

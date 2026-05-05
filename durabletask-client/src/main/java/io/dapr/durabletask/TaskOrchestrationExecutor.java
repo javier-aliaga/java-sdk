@@ -700,6 +700,64 @@ public final class TaskOrchestrationExecutor {
       return eventTask;
     }
 
+    @Override
+    public <V> Task<V> waitForAnyExternalEvent(Class<V> dataType, String... names) {
+      Helpers.throwIfOrchestratorComplete(this.isComplete);
+      Helpers.throwIfArgumentNull(names, "names");
+      Helpers.throwIfArgumentNull(dataType, "dataType");
+      if (names.length == 0) {
+        throw new IllegalArgumentException("At least one event name must be provided");
+      }
+
+      int id = this.sequenceNumber++;
+
+      // Shared task — the first matching event completes it
+      CompletableTask<V> sharedTask = new ExternalEventTask<>(
+          String.join("|", names), id, null);
+
+      // Check unprocessedEvents first (events received before we started waiting)
+      for (String name : names) {
+        for (java.util.Iterator<HistoryEvents.HistoryEvent> it =
+                 this.unprocessedEvents.iterator(); it.hasNext();) {
+          HistoryEvents.HistoryEvent e = it.next();
+          HistoryEvents.EventRaisedEvent existing = e.getEventRaised();
+          if (name.equalsIgnoreCase(existing.getName())) {
+            String rawEventData = existing.getInput().getValue();
+            V data = this.dataConverter.deserialize(rawEventData, dataType);
+            sharedTask.complete(data);
+            it.remove();
+            return sharedTask;
+          }
+        }
+      }
+
+      // Register the shared task under ALL event names
+      java.util.List<java.util.Map.Entry<String, TaskRecord<V>>> entries =
+          new java.util.ArrayList<>();
+      for (String name : names) {
+        TaskRecord<V> record = new TaskRecord<>(sharedTask, name, dataType);
+        Queue<TaskRecord<?>> eventQueue =
+            this.outstandingEvents.computeIfAbsent(name, k -> new LinkedList<>());
+        eventQueue.add(record);
+        entries.add(java.util.Map.entry(name, record));
+      }
+
+      // When the shared task completes (from any event), clean up all subscriptions
+      sharedTask.future.whenComplete((result, error) -> {
+        for (var entry : entries) {
+          Queue<TaskRecord<?>> queue = this.outstandingEvents.get(entry.getKey());
+          if (queue != null) {
+            queue.remove(entry.getValue());
+            if (queue.isEmpty()) {
+              this.outstandingEvents.remove(entry.getKey());
+            }
+          }
+        }
+      });
+
+      return sharedTask;
+    }
+
     private void handleTaskScheduled(HistoryEvents.HistoryEvent e) {
       int taskId = e.getEventId();
 

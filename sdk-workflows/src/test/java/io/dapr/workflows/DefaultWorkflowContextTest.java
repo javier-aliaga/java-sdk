@@ -97,6 +97,11 @@ public class DefaultWorkflowContextTest {
       }
 
       @Override
+      public <V> Task<V> waitForAnyExternalEvent(Class<V> dataType, String... names) {
+        return null;
+      }
+
+      @Override
       public <V> Task<V> callActivity(String name, Object input, WorkflowTaskOptions options, Class<V> returnType) {
         return null;
       }

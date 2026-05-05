@@ -137,6 +137,17 @@ public interface WorkflowContext {
   }
 
   /**
+   * Waits for any of the named external events and returns a {@link Task} that completes when
+   * the first matching event is received. Pending subscriptions for other names are cleaned up.
+   *
+   * @param dataType the expected class type of the event data payload
+   * @param names    the case-insensitive event names to wait for
+   * @param <V>      the expected type of the event data payload
+   * @return a new {@link Task} that completes when any of the named events is received
+   */
+  <V> Task<V> waitForAnyExternalEvent(Class<V> dataType, String... names);
+
+  /**
    * Asynchronously invokes an activity by name and with the specified input value and returns a new {@link Task}
    * that completes when the activity completes. If the activity completes successfully, the returned {@code Task}'s
    * value will be the activity's output. If the activity fails, the returned {@code Task} will complete exceptionally
