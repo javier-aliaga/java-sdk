@@ -35,6 +35,7 @@ import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.IndexDependencyBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.NativeImageProxyDefinitionBuildItem;
 import io.quarkus.gizmo.BranchResult;
 import io.quarkus.gizmo.BytecodeCreator;
 import io.quarkus.gizmo.CatchBlockCreator;
@@ -514,7 +515,8 @@ public class DaprAgenticProcessor {
   @Record(ExecutionTime.RUNTIME_INIT)
   void registerDurableAgentBeans(DurableAgentProxyRecorder recorder,
       CombinedIndexBuildItem combinedIndex,
-      BuildProducer<SyntheticBeanBuildItem> syntheticBeans) {
+      BuildProducer<SyntheticBeanBuildItem> syntheticBeans,
+      BuildProducer<NativeImageProxyDefinitionBuildItem> nativeProxies) {
 
     if (!isDurable()) {
       return;
@@ -546,6 +548,9 @@ public class DaprAgenticProcessor {
           .alternative(true)
           .priority(100)
           .done());
+      // The durable bean instance is a java.lang.reflect.Proxy of the interface; register it
+      // so the proxy works under native image.
+      nativeProxies.produce(new NativeImageProxyDefinitionBuildItem(List.of(interfaceName)));
     }
   }
 
