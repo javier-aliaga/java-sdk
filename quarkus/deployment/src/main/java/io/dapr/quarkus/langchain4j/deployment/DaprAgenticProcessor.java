@@ -174,6 +174,8 @@ public class DaprAgenticProcessor {
       "io.dapr.quarkus.langchain4j.workflow.orchestration.ConditionalOrchestrationWorkflow",
       // Per-agent workflow (one per @Agent invocation)
       "io.dapr.quarkus.langchain4j.agent.workflow.AgentRunWorkflow",
+      // Control-inversion approach: the agent's ReAct loop run AS a workflow
+      "io.dapr.quarkus.langchain4j.durable.ReActAgentWorkflow",
   };
 
   /**
@@ -192,6 +194,9 @@ public class DaprAgenticProcessor {
       "io.dapr.quarkus.langchain4j.agent.activities.LlmCallActivity",
       // Crash recovery activity
       "io.dapr.quarkus.langchain4j.agent.recovery.RecoveryAgentActivity",
+      // Control-inversion approach: durable ReAct loop activities
+      "io.dapr.quarkus.langchain4j.durable.AgentLlmActivity",
+      "io.dapr.quarkus.langchain4j.durable.AgentToolActivity",
   };
 
   @BuildStep
@@ -380,6 +385,9 @@ public class DaprAgenticProcessor {
     // Tool registry for crash recovery — scans @Tool CDI beans at startup.
     additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
         "io.dapr.quarkus.langchain4j.agent.recovery.ToolRegistry"));
+    // Control-inversion approach: tool-spec resolver used by the durable agent-llm activity.
+    additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
+        "io.dapr.quarkus.langchain4j.durable.AgentToolSpecRegistry"));
     // Registers the Dapr-backed AgenticScope store (checkpointing) when enabled.
     additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
         "io.dapr.quarkus.langchain4j.scope.AgenticScopeStoreInitializer"));

@@ -20,11 +20,12 @@ import dev.langchain4j.data.message.ChatMessageSerializer;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import io.dapr.quarkus.langchain4j.agent.DaprToolCallInterceptor;
 import io.dapr.workflows.WorkflowActivity;
 import io.dapr.workflows.WorkflowActivityContext;
 import io.quarkiverse.dapr.workflows.ActivityMetadata;
+import io.quarkus.arc.Arc;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.List;
@@ -37,10 +38,13 @@ import java.util.List;
  * assistant message serialized as JSON. No in-memory run context, so it can run on any
  * replica Dapr schedules it on.
  *
- * <p><b>Note (control-inversion cutover):</b> this injects the real {@link ChatModel}. On this
- * branch the legacy {@code DaprChatModelDecorator} still decorates {@code ChatModel} and would
- * re-route the call; the cutover deletes that decorator. Until then, disable it (or inject the
- * undecorated provider) when exercising this path.
+ * <p>The Dapr workflow runtime instantiates activities by reflection, not via CDI, so beans
+ * are obtained through {@link Arc} inside {@link #run} (the same pattern as the existing
+ * {@code RecoveryAgentActivity}) rather than {@code @Inject}.
+ *
+ * <p><b>Note (control-inversion cutover):</b> the resolved {@link ChatModel} is still wrapped
+ * by the legacy {@code DaprChatModelDecorator} on this branch; {@code IS_ACTIVITY_CALL} makes
+ * it pass through. The cutover deletes that decorator, after which the shim is unnecessary.
  */
 @ApplicationScoped
 @ActivityMetadata(name = "agent-llm")
@@ -48,25 +52,32 @@ public class AgentLlmActivity implements WorkflowActivity {
 
   private static final Logger LOG = Logger.getLogger(AgentLlmActivity.class);
 
-  @Inject
-  ChatModel chatModel;
-
-  @Inject
-  AgentToolSpecRegistry toolSpecRegistry;
-
   @Override
   public Object run(WorkflowActivityContext ctx) {
     LlmInput input = ctx.getInput(LlmInput.class);
+
+    ChatModel chatModel = Arc.container().instance(ChatModel.class).get();
+    AgentToolSpecRegistry toolSpecRegistry = Arc.container().instance(AgentToolSpecRegistry.class).get();
+
     List<ChatMessage> messages = ChatMessageDeserializer.messagesFromJson(input.messagesJson());
     List<ToolSpecification> tools = toolSpecRegistry.specsFor(input.agentName());
-
     LOG.debugf("[agent-llm:%s] %d messages, %d tools", input.agentName(), messages.size(), tools.size());
 
     ChatRequest.Builder request = ChatRequest.builder().messages(messages);
     if (!tools.isEmpty()) {
       request.toolSpecifications(tools);
     }
-    ChatResponse response = chatModel.chat(request.build());
-    return new LlmResult(ChatMessageSerializer.messageToJson(response.aiMessage()));
+
+    // Coexistence shim: on this branch the legacy DaprChatModelDecorator still wraps ChatModel
+    // and would re-route this call into the old per-agent workflow. IS_ACTIVITY_CALL makes it
+    // pass straight through to the real model. The control-inversion cutover deletes that
+    // decorator, after which this shim is unnecessary.
+    DaprToolCallInterceptor.IS_ACTIVITY_CALL.set(Boolean.TRUE);
+    try {
+      ChatResponse response = chatModel.chat(request.build());
+      return new LlmResult(ChatMessageSerializer.messageToJson(response.aiMessage()));
+    } finally {
+      DaprToolCallInterceptor.IS_ACTIVITY_CALL.remove();
+    }
   }
 }

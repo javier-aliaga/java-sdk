@@ -15,12 +15,13 @@ package io.dapr.quarkus.langchain4j.durable;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.dapr.quarkus.langchain4j.agent.DaprToolCallInterceptor;
 import io.dapr.quarkus.langchain4j.agent.recovery.ToolRegistry;
 import io.dapr.workflows.WorkflowActivity;
 import io.dapr.workflows.WorkflowActivityContext;
 import io.quarkiverse.dapr.workflows.ActivityMetadata;
+import io.quarkus.arc.Arc;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.lang.reflect.Parameter;
@@ -31,7 +32,8 @@ import java.util.Map;
  *
  * <p>Resolves the tool by name via {@link ToolRegistry}, binds the model's JSON arguments to
  * the method parameters, and returns the result as text. Like {@link AgentLlmActivity}, it
- * depends only on its {@link ToolInput} and the (replica-wide) tool registry.
+ * depends only on its {@link ToolInput} and the (replica-wide) tool registry, obtained via
+ * {@link Arc} since the workflow runtime instantiates activities by reflection.
  *
  * <p><b>At-least-once:</b> activities can be redelivered, so side-effecting tools must be
  * idempotent or externally guarded.
@@ -47,18 +49,24 @@ public class AgentToolActivity implements WorkflowActivity {
   private static final Logger LOG = Logger.getLogger(AgentToolActivity.class);
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
-  @Inject
-  ToolRegistry toolRegistry;
-
   @Override
   public Object run(WorkflowActivityContext ctx) {
     ToolInput input = ctx.getInput(ToolInput.class);
-    Object[] args = parseArguments(input.toolName(), input.arguments());
-    String result = toolRegistry.invokeTool(input.toolName(), args);
-    return new ToolResult(input.toolCallId(), input.toolName(), result);
+    ToolRegistry toolRegistry = Arc.container().instance(ToolRegistry.class).get();
+    Object[] args = parseArguments(toolRegistry, input.toolName(), input.arguments());
+
+    // Coexistence shim (see AgentLlmActivity): pass through the legacy DaprToolCallInterceptor
+    // so the @Tool runs directly instead of being re-routed. Removed at the cutover.
+    DaprToolCallInterceptor.IS_ACTIVITY_CALL.set(Boolean.TRUE);
+    try {
+      String result = toolRegistry.invokeTool(input.toolName(), args);
+      return new ToolResult(input.toolCallId(), input.toolName(), result);
+    } finally {
+      DaprToolCallInterceptor.IS_ACTIVITY_CALL.remove();
+    }
   }
 
-  private Object[] parseArguments(String toolName, String argsJson) {
+  private Object[] parseArguments(ToolRegistry toolRegistry, String toolName, String argsJson) {
     ToolRegistry.ToolEntry entry = toolRegistry.getToolEntry(toolName);
     if (entry == null) {
       return new Object[0];
