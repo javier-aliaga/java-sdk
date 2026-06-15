@@ -18,6 +18,7 @@ import io.dapr.quarkus.langchain4j.agent.AgentRunLifecycleManager;
 import io.dapr.quarkus.langchain4j.agent.DaprAgentContextHolder;
 import io.dapr.quarkus.langchain4j.agent.DaprAgentMetadataHolder;
 import io.dapr.quarkus.langchain4j.durable.AgentMethodMeta;
+import io.dapr.quarkus.langchain4j.durable.ConditionalBranch;
 import io.dapr.quarkus.langchain4j.durable.DurableAgentProxyRecorder;
 import io.dapr.quarkus.langchain4j.durable.SubAgentSpec;
 import io.dapr.quarkus.langchain4j.workflow.DaprWorkflowRuntimeRecorder;
@@ -179,6 +180,8 @@ public class DaprAgenticProcessor {
       DotName.createSimple("dev.langchain4j.agentic.declarative.LoopAgent");
   private static final DotName CONDITIONAL_AGENT_ANNOTATION =
       DotName.createSimple("dev.langchain4j.agentic.declarative.ConditionalAgent");
+  private static final DotName ACTIVATION_CONDITION_ANNOTATION =
+      DotName.createSimple("dev.langchain4j.agentic.declarative.ActivationCondition");
 
   private static final String ORCH_PKG =
       "io.dapr.quarkus.langchain4j.workflow.orchestration.";
@@ -524,6 +527,7 @@ public class DaprAgenticProcessor {
     collectAgentMethods(index, SEQUENCE_AGENT_ANNOTATION, "durable-sequence", byInterface);
     collectAgentMethods(index, PARALLEL_AGENT_ANNOTATION, "durable-parallel", byInterface);
     collectAgentMethods(index, LOOP_AGENT_ANNOTATION, "durable-loop", byInterface);
+    collectAgentMethods(index, CONDITIONAL_AGENT_ANNOTATION, "durable-conditional", byInterface);
 
     for (Map.Entry<DotName, Map<String, AgentMethodMeta>> entry : byInterface.entrySet()) {
       String interfaceName = entry.getKey().toString();
@@ -570,7 +574,7 @@ public class DaprAgenticProcessor {
       return new AgentMethodMeta(workflowName, extractAgentName(method),
           extractAnnotationText(method, USER_MESSAGE_ANNOTATION),
           extractAnnotationText(method, SYSTEM_MESSAGE_ANNOTATION),
-          varNames, List.of(), null, 0);
+          varNames, List.of(), null, 0, List.of());
     }
 
     AnnotationInstance composite = method.annotation(annotation);
@@ -579,9 +583,15 @@ public class DaprAgenticProcessor {
       name = method.declaringClass().name().withoutPackagePrefix() + "." + method.name();
     }
     String outputKey = stringValueOrNull(composite, "outputKey");
+
+    if (annotation.equals(CONDITIONAL_AGENT_ANNOTATION)) {
+      return new AgentMethodMeta(workflowName, name, null, null, varNames, List.of(), outputKey, 0,
+          resolveConditionalBranches(index, composite, method.declaringClass()));
+    }
+
     int maxIterations = annotation.equals(LOOP_AGENT_ANNOTATION) ? intValueOrDefault(composite, 2) : 0;
     return new AgentMethodMeta(workflowName, name, null, null, varNames,
-        resolveSubAgents(index, composite), outputKey, maxIterations);
+        resolveSubAgents(index, composite), outputKey, maxIterations, List.of());
   }
 
   private List<SubAgentSpec> resolveSubAgents(IndexView index, AnnotationInstance composite) {
@@ -591,22 +601,66 @@ public class DaprAgenticProcessor {
       return specs;
     }
     for (Type subType : subAgentsValue.asClassArray()) {
-      ClassInfo subInterface = index.getClassByName(subType.name());
-      if (subInterface == null) {
-        continue;
-      }
-      for (MethodInfo subMethod : subInterface.methods()) {
-        if (subMethod.hasAnnotation(AGENT_ANNOTATION)) {
-          AnnotationInstance subAgent = subMethod.annotation(AGENT_ANNOTATION);
-          String subOutputKey = stringValueOrNull(subAgent, "outputKey");
-          specs.add(new SubAgentSpec(extractAgentName(subMethod),
-              extractAnnotationText(subMethod, USER_MESSAGE_ANNOTATION),
-              subOutputKey != null ? subOutputKey : "output"));
-          break;
-        }
+      SubAgentSpec spec = resolveSubAgentSpec(index, subType);
+      if (spec != null) {
+        specs.add(spec);
       }
     }
     return specs;
+  }
+
+  private SubAgentSpec resolveSubAgentSpec(IndexView index, Type subType) {
+    ClassInfo subInterface = index.getClassByName(subType.name());
+    if (subInterface == null) {
+      return null;
+    }
+    for (MethodInfo subMethod : subInterface.methods()) {
+      if (subMethod.hasAnnotation(AGENT_ANNOTATION)) {
+        String subOutputKey = stringValueOrNull(subMethod.annotation(AGENT_ANNOTATION), "outputKey");
+        return new SubAgentSpec(extractAgentName(subMethod),
+            extractAnnotationText(subMethod, USER_MESSAGE_ANNOTATION),
+            subOutputKey != null ? subOutputKey : "output");
+      }
+    }
+    return null;
+  }
+
+  private List<ConditionalBranch> resolveConditionalBranches(IndexView index,
+      AnnotationInstance composite, ClassInfo router) {
+    List<ConditionalBranch> branches = new ArrayList<>();
+    AnnotationValue subAgentsValue = composite.value("subAgents");
+    if (subAgentsValue == null) {
+      return branches;
+    }
+    for (Type subType : subAgentsValue.asClassArray()) {
+      SubAgentSpec spec = resolveSubAgentSpec(index, subType);
+      if (spec == null) {
+        continue;
+      }
+      MethodInfo condition = findActivationCondition(router, subType.name());
+      if (condition != null) {
+        branches.add(new ConditionalBranch(spec, router.name().toString(),
+            condition.name(), orderedParamNames(condition)));
+      } else {
+        branches.add(new ConditionalBranch(spec, null, null, List.of()));
+      }
+    }
+    return branches;
+  }
+
+  private MethodInfo findActivationCondition(ClassInfo router, DotName subAgentClass) {
+    for (MethodInfo method : router.methods()) {
+      AnnotationInstance condition = method.annotation(ACTIVATION_CONDITION_ANNOTATION);
+      if (condition == null || condition.value() == null) {
+        continue;
+      }
+      for (Type guarded : condition.value().asClassArray()) {
+        if (guarded.name().equals(subAgentClass)) {
+          return method;
+        }
+      }
+    }
+    return null;
   }
 
   private List<String> orderedParamNames(MethodInfo method) {

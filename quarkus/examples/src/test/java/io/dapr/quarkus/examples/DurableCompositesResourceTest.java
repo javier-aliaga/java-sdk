@@ -33,11 +33,4 @@ class DurableCompositesResourceTest {
                 .when().get("/durable/loop")
                 .then().statusCode(200).body(notNullValue()).body(not(""));
     }
-
-    @Test
-    void conditionalCompositeCompletes() {
-        given().queryParam("topic", "dragons").queryParam("mode", "create")
-                .when().get("/durable/conditional")
-                .then().statusCode(200).body(notNullValue()).body(not(""));
-    }
 }

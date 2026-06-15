@@ -34,6 +34,9 @@ class DurableEntryPointTest {
     @Inject
     StoryCreator storyCreator;
 
+    @Inject
+    StoryRouter storyRouter;
+
     @Test
     void leafAgentRunsAsReactAgentWorkflow() {
         String story = creativeWriter.generateStory("dragons");
@@ -46,5 +49,12 @@ class DurableEntryPointTest {
         String story = storyCreator.write("dragons", "comedy");
         assertNotNull(story);
         assertFalse(story.isBlank(), "expected the durable-sequence workflow to return a story");
+    }
+
+    @Test
+    void conditionalRunsAsDurableConditionalWorkflow() {
+        String story = storyRouter.route("dragons");
+        assertNotNull(story);
+        assertFalse(story.isBlank(), "expected the durable-conditional workflow to return a story");
     }
 }

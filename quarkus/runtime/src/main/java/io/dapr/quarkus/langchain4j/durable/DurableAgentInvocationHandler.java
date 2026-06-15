@@ -101,6 +101,8 @@ public class DurableAgentInvocationHandler implements InvocationHandler {
           meta.subAgents(), state, meta.outputKey());
       case "durable-loop" -> new DurableLoopInput(
           meta.subAgents(), state, meta.outputKey(), meta.maxIterations());
+      case "durable-conditional" -> new DurableConditionalInput(
+          meta.branches(), state, meta.outputKey());
       default -> throw new IllegalStateException("Unsupported durable workflow: " + meta.workflowName());
     };
   }

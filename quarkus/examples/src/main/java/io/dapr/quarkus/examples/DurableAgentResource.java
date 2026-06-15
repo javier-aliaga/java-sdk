@@ -13,7 +13,6 @@ limitations under the License.
 
 package io.dapr.quarkus.examples;
 
-import io.dapr.quarkus.langchain4j.durable.DurableConditionalInput;
 import io.dapr.quarkus.langchain4j.durable.DurableLoopInput;
 import io.dapr.quarkus.langchain4j.durable.DurableSequenceInput;
 import io.dapr.quarkus.langchain4j.durable.ReActInput;
@@ -155,32 +154,6 @@ public class DurableAgentResource {
         "story",
         iterations);
     return runComposite("durable-loop", "durable-loop-", input);
-  }
-
-  /**
-   * Starts a durable conditional composite (branch on the {@code mode} state value).
-   *
-   * @param topic the story topic
-   * @param mode  {@code create} selects the writer branch; anything else the editor branch
-   * @return the chosen branch's output
-   * @throws TimeoutException if the workflow does not complete within the wait window
-   */
-  @GET
-  @Path("/conditional")
-  @Produces(MediaType.TEXT_PLAIN)
-  public String conditional(@QueryParam("topic") @DefaultValue("dragons and wizards") String topic,
-      @QueryParam("mode") @DefaultValue("create") String mode) throws TimeoutException {
-    DurableConditionalInput input = new DurableConditionalInput(
-        List.of(
-            new SubAgentSpec("creative-writer-agent",
-                "Write a 3-sentence story about {{topic}}. Return only the story.", "story"),
-            new SubAgentSpec("style-editor-agent",
-                "Write a fancy 3-sentence story about {{topic}}. Return only the story.", "story")),
-        Map.of("topic", topic, "mode", mode),
-        "story",
-        "mode",
-        "create");
-    return runComposite("durable-conditional", "durable-conditional-", input);
   }
 
   private String runComposite(String workflowName, String idPrefix, Object input)

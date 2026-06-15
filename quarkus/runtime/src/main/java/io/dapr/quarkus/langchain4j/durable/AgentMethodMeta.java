@@ -29,9 +29,10 @@ import java.util.List;
  * @param systemTemplate leaf {@code @SystemMessage} template, or {@code null}
  * @param varNames      method parameter names in order (the {@code @V} names), for
  *                      {@code {{var}}} substitution / initial state
- * @param subAgents     composite sub-agent steps (empty for a leaf)
+ * @param subAgents     composite sub-agent steps (empty for a leaf or conditional)
  * @param outputKey     composite output key to return (or {@code null})
  * @param maxIterations loop iteration count (0 if not a loop)
+ * @param branches      conditional branches (empty unless a conditional composite)
  */
 public record AgentMethodMeta(
     String workflowName,
@@ -41,5 +42,6 @@ public record AgentMethodMeta(
     List<String> varNames,
     List<SubAgentSpec> subAgents,
     String outputKey,
-    int maxIterations) {
+    int maxIterations,
+    List<ConditionalBranch> branches) {
 }

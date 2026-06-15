@@ -19,19 +19,15 @@ import java.util.Map;
 /**
  * Input to {@link DurableConditionalWorkflow}.
  *
- * <p>Branch selection is data-driven: if {@code initialState[conditionKey]} equals
- * {@code expectedValue}, the first sub-agent runs; otherwise the second (if present).
+ * <p>Branches are evaluated in order; the first whose {@code @ActivationCondition} predicate
+ * returns {@code true} (given the seed state) runs its sub-agent.
  *
- * @param subAgents      {@code [0]} = match branch, {@code [1]} = else branch (optional)
- * @param initialState   seed state for the condition and template rendering
+ * @param branches       the candidate branches, in declaration order
+ * @param initialState   seed state for condition evaluation and template rendering
  * @param finalOutputKey state key to return; {@code null} returns the chosen agent's output
- * @param conditionKey   state key to test
- * @param expectedValue  value that selects the match branch
  */
 public record DurableConditionalInput(
-    List<SubAgentSpec> subAgents,
+    List<ConditionalBranch> branches,
     Map<String, String> initialState,
-    String finalOutputKey,
-    String conditionKey,
-    String expectedValue) {
+    String finalOutputKey) {
 }
