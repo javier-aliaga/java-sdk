@@ -17,11 +17,15 @@ import io.dapr.quarkus.langchain4j.agent.AgentRunBindingRegistry;
 import io.dapr.quarkus.langchain4j.agent.AgentRunLifecycleManager;
 import io.dapr.quarkus.langchain4j.agent.DaprAgentContextHolder;
 import io.dapr.quarkus.langchain4j.agent.DaprAgentMetadataHolder;
+import io.dapr.quarkus.langchain4j.durable.AgentMethodMeta;
+import io.dapr.quarkus.langchain4j.durable.DurableAgentProxyRecorder;
+import io.dapr.quarkus.langchain4j.durable.SubAgentSpec;
 import io.dapr.quarkus.langchain4j.workflow.DaprWorkflowRuntimeRecorder;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.AnnotationsTransformerBuildItem;
 import io.quarkus.arc.deployment.GeneratedBeanBuildItem;
 import io.quarkus.arc.deployment.GeneratedBeanGizmoAdaptor;
+import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
 import io.quarkus.arc.processor.AnnotationsTransformer;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
@@ -45,10 +49,12 @@ import io.quarkus.runtime.RuntimeValue;
 import jakarta.annotation.Priority;
 import jakarta.decorator.Decorator;
 import jakarta.decorator.Delegate;
+import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.Dependent;
 import jakarta.enterprise.inject.Any;
 import jakarta.inject.Inject;
 import jakarta.interceptor.Interceptor;
+import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.AnnotationTarget;
 import org.jboss.jandex.AnnotationValue;
@@ -60,7 +66,10 @@ import org.jboss.jandex.Type;
 import org.jboss.logging.Logger;
 
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -122,6 +131,20 @@ public class DaprAgenticProcessor {
    */
   private static final DotName SYSTEM_MESSAGE_ANNOTATION =
       DotName.createSimple("dev.langchain4j.service.SystemMessage");
+
+  /**
+   * LangChain4j {@code @V} annotation — names a method parameter for {@code {{var}}} binding.
+   */
+  private static final DotName V_ANNOTATION =
+      DotName.createSimple("dev.langchain4j.service.V");
+
+  /**
+   * Build-time flag selecting the control-inversion engine (agents run as durable workflows).
+   */
+  private static boolean isDurable() {
+    return ConfigProvider.getConfig()
+        .getOptionalValue("dapr.agentic.durable", Boolean.class).orElse(false);
+  }
 
   /**
    * Our interceptor binding that triggers {@code DaprToolCallInterceptor}.
@@ -445,6 +468,12 @@ public class DaprAgenticProcessor {
       CombinedIndexBuildItem combinedIndex,
       BuildProducer<GeneratedBeanBuildItem> generatedBeans) {
 
+    // In durable mode the agent beans are replaced wholesale (see registerDurableAgentBeans),
+    // so the passive-path decorator would only get in the way.
+    if (isDurable()) {
+      return;
+    }
+
     IndexView index = combinedIndex.getIndex();
     ClassOutput classOutput = new GeneratedBeanGizmoAdaptor(generatedBeans);
 
@@ -469,6 +498,142 @@ public class DaprAgenticProcessor {
 
       generateDecorator(classOutput, index, declaringClass);
     }
+  }
+
+  /**
+   * Control-inversion entry point (uniform): when {@code dapr.agentic.durable=true}, replace each
+   * agent interface's AiServices-built synthetic bean (registered by the quarkiverse agentic
+   * processor) with an alternative synthetic bean whose instance is a {@code java.lang.reflect.Proxy}
+   * that runs the agent as a durable Dapr Workflow ({@code react-agent} for leaves, {@code durable-*}
+   * for composites). Marked {@code alternative} with priority so it wins over the AiServices bean.
+   */
+  @BuildStep
+  @Record(ExecutionTime.RUNTIME_INIT)
+  void registerDurableAgentBeans(DurableAgentProxyRecorder recorder,
+      CombinedIndexBuildItem combinedIndex,
+      BuildProducer<SyntheticBeanBuildItem> syntheticBeans) {
+
+    if (!isDurable()) {
+      return;
+    }
+
+    IndexView index = combinedIndex.getIndex();
+    Map<DotName, Map<String, AgentMethodMeta>> byInterface = new HashMap<>();
+
+    collectAgentMethods(index, AGENT_ANNOTATION, "react-agent", byInterface);
+    collectAgentMethods(index, SEQUENCE_AGENT_ANNOTATION, "durable-sequence", byInterface);
+    collectAgentMethods(index, PARALLEL_AGENT_ANNOTATION, "durable-parallel", byInterface);
+    collectAgentMethods(index, LOOP_AGENT_ANNOTATION, "durable-loop", byInterface);
+
+    for (Map.Entry<DotName, Map<String, AgentMethodMeta>> entry : byInterface.entrySet()) {
+      String interfaceName = entry.getKey().toString();
+      LOG.infof("Registering durable agent bean for %s (%d method(s))",
+          interfaceName, entry.getValue().size());
+      syntheticBeans.produce(SyntheticBeanBuildItem
+          .configure(entry.getKey())
+          // Distinct identifier so this coexists with the quarkiverse-built synthetic bean
+          // (same types+qualifiers would otherwise collide); the alternative + priority then
+          // makes this one win at injection.
+          .identifier("durableAgent_" + interfaceName.replace('.', '_'))
+          .forceApplicationClass()
+          .createWith(recorder.createAgentProxy(interfaceName, entry.getValue()))
+          .setRuntimeInit()
+          .scope(ApplicationScoped.class)
+          .alternative(true)
+          .priority(100)
+          .done());
+    }
+  }
+
+  private void collectAgentMethods(IndexView index, DotName annotation, String workflowName,
+      Map<DotName, Map<String, AgentMethodMeta>> byInterface) {
+    for (AnnotationInstance ann : index.getAnnotations(annotation)) {
+      if (ann.target().kind() != AnnotationTarget.Kind.METHOD) {
+        continue;
+      }
+      MethodInfo method = ann.target().asMethod();
+      if (!method.declaringClass().isInterface()) {
+        continue;
+      }
+      AgentMethodMeta meta = buildAgentMethodMeta(index, method, annotation, workflowName);
+      byInterface
+          .computeIfAbsent(method.declaringClass().name(), k -> new HashMap<>())
+          .put(method.name(), meta);
+    }
+  }
+
+  private AgentMethodMeta buildAgentMethodMeta(IndexView index, MethodInfo method,
+      DotName annotation, String workflowName) {
+    List<String> varNames = orderedParamNames(method);
+
+    if (annotation.equals(AGENT_ANNOTATION)) {
+      return new AgentMethodMeta(workflowName, extractAgentName(method),
+          extractAnnotationText(method, USER_MESSAGE_ANNOTATION),
+          extractAnnotationText(method, SYSTEM_MESSAGE_ANNOTATION),
+          varNames, List.of(), null, 0);
+    }
+
+    AnnotationInstance composite = method.annotation(annotation);
+    String name = stringValueOrNull(composite, "name");
+    if (name == null || name.isBlank()) {
+      name = method.declaringClass().name().withoutPackagePrefix() + "." + method.name();
+    }
+    String outputKey = stringValueOrNull(composite, "outputKey");
+    int maxIterations = annotation.equals(LOOP_AGENT_ANNOTATION) ? intValueOrDefault(composite, 2) : 0;
+    return new AgentMethodMeta(workflowName, name, null, null, varNames,
+        resolveSubAgents(index, composite), outputKey, maxIterations);
+  }
+
+  private List<SubAgentSpec> resolveSubAgents(IndexView index, AnnotationInstance composite) {
+    List<SubAgentSpec> specs = new ArrayList<>();
+    AnnotationValue subAgentsValue = composite.value("subAgents");
+    if (subAgentsValue == null) {
+      return specs;
+    }
+    for (Type subType : subAgentsValue.asClassArray()) {
+      ClassInfo subInterface = index.getClassByName(subType.name());
+      if (subInterface == null) {
+        continue;
+      }
+      for (MethodInfo subMethod : subInterface.methods()) {
+        if (subMethod.hasAnnotation(AGENT_ANNOTATION)) {
+          AnnotationInstance subAgent = subMethod.annotation(AGENT_ANNOTATION);
+          String subOutputKey = stringValueOrNull(subAgent, "outputKey");
+          specs.add(new SubAgentSpec(extractAgentName(subMethod),
+              extractAnnotationText(subMethod, USER_MESSAGE_ANNOTATION),
+              subOutputKey != null ? subOutputKey : "output"));
+          break;
+        }
+      }
+    }
+    return specs;
+  }
+
+  private List<String> orderedParamNames(MethodInfo method) {
+    Map<Integer, String> byPosition = new HashMap<>();
+    for (AnnotationInstance ann : method.annotations()) {
+      if (ann.name().equals(V_ANNOTATION)
+          && ann.target() != null
+          && ann.target().kind() == AnnotationTarget.Kind.METHOD_PARAMETER) {
+        AnnotationValue value = ann.value();
+        if (value != null) {
+          byPosition.put((int) ann.target().asMethodParameter().position(), value.asString());
+        }
+      }
+    }
+    List<String> ordered = new ArrayList<>();
+    for (int i = 0; i < method.parametersCount(); i++) {
+      ordered.add(byPosition.getOrDefault(i, "arg" + i));
+    }
+    return ordered;
+  }
+
+  private static int intValueOrDefault(AnnotationInstance annotation, int defaultValue) {
+    if (annotation == null) {
+      return defaultValue;
+    }
+    AnnotationValue value = annotation.value("maxIterations");
+    return value == null ? defaultValue : value.asInt();
   }
 
   // -------------------------------------------------------------------------
