@@ -13,7 +13,9 @@ limitations under the License.
 
 package io.dapr.quarkus.examples;
 
+import io.dapr.quarkus.langchain4j.durable.DurableSequenceInput;
 import io.dapr.quarkus.langchain4j.durable.ReActInput;
+import io.dapr.quarkus.langchain4j.durable.SubAgentSpec;
 import io.dapr.workflows.client.DaprWorkflowClient;
 import io.dapr.workflows.client.WorkflowInstanceStatus;
 import jakarta.inject.Inject;
@@ -25,6 +27,8 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeoutException;
 
@@ -64,6 +68,41 @@ public class DurableAgentResource {
     ReActInput input = new ReActInput("creative-writer-agent", null, userMessage, null, 8);
     String instanceId = "durable-" + UUID.randomUUID();
     workflowClient.scheduleNewWorkflow("react-agent", input, instanceId);
+
+    WorkflowInstanceStatus status =
+        workflowClient.waitForInstanceCompletion(instanceId, Duration.ofSeconds(60), true);
+    return status.readOutputAs(String.class);
+  }
+
+  /**
+   * Starts a durable sequential composite (two react-agent children) and returns its result.
+   *
+   * <p>Runs {@code creative-writer-agent} then {@code style-editor-agent} as child workflows,
+   * threading the {@code story} state between them — the control-inversion equivalent of a
+   * {@code @SequenceAgent}, with no planner bridge.
+   *
+   * @param topic the story topic
+   * @return the final (style-edited) story
+   * @throws TimeoutException if the workflow does not complete within the wait window
+   */
+  @GET
+  @Path("/sequence")
+  @Produces(MediaType.TEXT_PLAIN)
+  public String sequence(@QueryParam("topic") @DefaultValue("dragons and wizards") String topic)
+      throws TimeoutException {
+    DurableSequenceInput input = new DurableSequenceInput(
+        List.of(
+            new SubAgentSpec("creative-writer-agent",
+                "You are a creative writer. Write a 3-sentence story about {{topic}}. "
+                    + "Return only the story.", "story"),
+            new SubAgentSpec("style-editor-agent",
+                "You are a style editor. Improve the style of this story: {{story}}. "
+                    + "Return only the improved story.", "story")),
+        Map.of("topic", topic),
+        "story");
+
+    String instanceId = "durable-sequence-" + UUID.randomUUID();
+    workflowClient.scheduleNewWorkflow("durable-sequence", input, instanceId);
 
     WorkflowInstanceStatus status =
         workflowClient.waitForInstanceCompletion(instanceId, Duration.ofSeconds(60), true);

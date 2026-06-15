@@ -176,6 +176,8 @@ public class DaprAgenticProcessor {
       "io.dapr.quarkus.langchain4j.agent.workflow.AgentRunWorkflow",
       // Control-inversion approach: the agent's ReAct loop run AS a workflow
       "io.dapr.quarkus.langchain4j.durable.ReActAgentWorkflow",
+      // Control-inversion composite: sequential orchestration calling react-agent children
+      "io.dapr.quarkus.langchain4j.durable.DurableSequenceWorkflow",
   };
 
   /**
