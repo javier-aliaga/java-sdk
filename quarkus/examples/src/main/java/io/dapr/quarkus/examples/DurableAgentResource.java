@@ -69,4 +69,31 @@ public class DurableAgentResource {
         workflowClient.waitForInstanceCompletion(instanceId, Duration.ofSeconds(60), true);
     return status.readOutputAs(String.class);
   }
+
+  /**
+   * Starts the durable ReAct workflow for a tool-using research agent and returns its result.
+   *
+   * <p>Exercises the {@code agent-tool} activity: the model requests a tool call, the tool runs
+   * as a replica-agnostic activity, and its result is fed back into the loop.
+   *
+   * @param country the country to research
+   * @return the research summary
+   * @throws TimeoutException if the workflow does not complete within the wait window
+   */
+  @GET
+  @Path("/research")
+  @Produces(MediaType.TEXT_PLAIN)
+  public String research(@QueryParam("country") @DefaultValue("France") String country)
+      throws TimeoutException {
+    String userMessage = "You are a research assistant. Write a concise summary about the country "
+        + country + " using the available tools. Return only the summary.";
+
+    ReActInput input = new ReActInput("research-location-agent", null, userMessage, null, 8);
+    String instanceId = "durable-research-" + UUID.randomUUID();
+    workflowClient.scheduleNewWorkflow("react-agent", input, instanceId);
+
+    WorkflowInstanceStatus status =
+        workflowClient.waitForInstanceCompletion(instanceId, Duration.ofSeconds(60), true);
+    return status.readOutputAs(String.class);
+  }
 }
