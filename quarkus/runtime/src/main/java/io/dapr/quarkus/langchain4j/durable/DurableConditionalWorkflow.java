@@ -13,6 +13,7 @@ limitations under the License.
 
 package io.dapr.quarkus.langchain4j.durable;
 
+import io.dapr.durabletask.Task;
 import io.dapr.workflows.Workflow;
 import io.dapr.workflows.WorkflowStub;
 import io.quarkiverse.dapr.workflows.WorkflowMetadata;
@@ -20,17 +21,20 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
- * Durable conditional composite: evaluates each branch's {@code @ActivationCondition} predicate
- * in order and runs the first matching sub-agent as a {@code react-agent} child workflow.
+ * Durable conditional composite: runs <em>every</em> sub-agent whose {@code @ActivationCondition}
+ * predicate is true, concurrently, as {@code react-agent} child workflows.
  *
- * <p>Control-inversion replacement for {@code ConditionalOrchestrationWorkflow}. The activation
- * conditions are pure static predicates, so they are invoked reflectively here — deterministic
- * given the (replayed) state, hence replay-safe. (A condition that performs I/O would break
- * determinism; activation conditions are expected to be pure.)
+ * <p>Control-inversion replacement for {@code ConditionalOrchestrationWorkflow}, matching
+ * LangChain4j's {@code ConditionalPlanner} semantics (filter sub-agents by predicate, then call
+ * the whole matching set) — not first-match. The activation conditions are pure static
+ * predicates, invoked reflectively here — deterministic given the (replayed) state, hence
+ * replay-safe. (A condition that performs I/O would break determinism; conditions must be pure.)
  */
 @ApplicationScoped
 @WorkflowMetadata(name = "durable-conditional")
@@ -45,24 +49,35 @@ public class DurableConditionalWorkflow implements Workflow {
       DurableConditionalInput input = ctx.getInput(DurableConditionalInput.class);
       Map<String, String> state = new HashMap<>(input.initialState());
 
+      // Select every branch whose activation condition holds (LangChain4j semantics).
+      List<SubAgentSpec> selected = new ArrayList<>();
       for (ConditionalBranch branch : input.branches()) {
-        if (!matches(branch, state)) {
-          continue;
+        if (matches(branch, state)) {
+          selected.add(branch.agent());
         }
-        SubAgentSpec agent = branch.agent();
-        String userMessage = DurableRendering.render(agent.userMessageTemplate(), state);
-        String output = ctx.callChildWorkflow("react-agent",
-            new ReActInput(agent.agentName(), null, userMessage, null, CHILD_MAX_STEPS),
-            String.class).await();
-        state.put(agent.outputKey(), output);
-        String result = input.finalOutputKey() != null
-            ? state.get(input.finalOutputKey()) : output;
-        ctx.complete(result);
+      }
+
+      if (selected.isEmpty()) {
+        ctx.complete(input.finalOutputKey() != null ? state.get(input.finalOutputKey()) : null);
         return;
       }
 
-      // No branch matched.
-      ctx.complete(input.finalOutputKey() != null ? state.get(input.finalOutputKey()) : null);
+      // Run the matching sub-agents concurrently as react-agent children.
+      List<Task<String>> tasks = new ArrayList<>();
+      for (SubAgentSpec agent : selected) {
+        String userMessage = DurableRendering.render(agent.userMessageTemplate(), state);
+        tasks.add(ctx.callChildWorkflow("react-agent",
+            new ReActInput(agent.agentName(), null, userMessage, null, CHILD_MAX_STEPS),
+            String.class));
+      }
+      List<String> outputs = ctx.allOf(tasks).await();
+      for (int i = 0; i < selected.size(); i++) {
+        state.put(selected.get(i).outputKey(), outputs.get(i));
+      }
+
+      String result = input.finalOutputKey() != null
+          ? state.get(input.finalOutputKey()) : outputs.get(outputs.size() - 1);
+      ctx.complete(result);
     };
   }
 
