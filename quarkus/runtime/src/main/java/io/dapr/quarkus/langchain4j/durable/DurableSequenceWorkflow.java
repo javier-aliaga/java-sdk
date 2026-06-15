@@ -45,23 +45,18 @@ public class DurableSequenceWorkflow implements Workflow {
   public WorkflowStub create() {
     return ctx -> {
       DurableSequenceInput input = ctx.getInput(DurableSequenceInput.class);
-
       Map<String, String> state = new HashMap<>(input.initialState());
-      String lastOutput = null;
 
-      for (SubAgentSpec spec : input.subAgents()) {
-        String userMessage = DurableRendering.render(spec.userMessageTemplate(), state);
-        ReActInput childInput = new ReActInput(
-            spec.agentName(), null, userMessage, null, CHILD_MAX_STEPS);
+      // Each sub-agent (leaf or nested composite) runs as a child workflow; its outputs merge into
+      // state before the next renders.
+      DurableChildren.runSequential(ctx, input.subAgents(), state);
 
-        // Deterministic child instance id is auto-assigned by the runtime; the child is a
-        // durable react-agent, so this step is itself recoverable/replica-agnostic.
-        String output = ctx.callChildWorkflow("react-agent", childInput, String.class).await();
-        state.put(spec.outputKey(), output);
-        lastOutput = output;
+      String result = DurableOutput.resolve(input.combiner(), input.finalOutputKey(), state, null);
+      if (input.finalOutputKey() != null && result != null) {
+        state.put(input.finalOutputKey(), result);
       }
-
-      ctx.complete(DurableOutput.resolve(input.combiner(), input.finalOutputKey(), state, lastOutput));
+      // Complete with the full state so a parent composite can propagate inner keys upward.
+      ctx.complete(state);
     };
   }
 }

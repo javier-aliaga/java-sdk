@@ -23,13 +23,13 @@ import java.util.List;
  * resolved at build time and invoked reflectively at run time on any replica — no opaque lambda
  * to serialize.
  *
- * @param agent          the sub-agent to run if this branch is selected
+ * @param agent          the sub-agent node to run if this branch is selected (leaf or composite)
  * @param conditionClass FQCN declaring the {@code @ActivationCondition} method ({@code null} = always)
  * @param conditionMethod the static predicate method name ({@code null} = always)
  * @param conditionVars  the condition method's {@code @V} parameter names, in order
  */
 public record ConditionalBranch(
-    SubAgentSpec agent,
+    AgentMethodMeta agent,
     String conditionClass,
     String conditionMethod,
     List<String> conditionVars) {

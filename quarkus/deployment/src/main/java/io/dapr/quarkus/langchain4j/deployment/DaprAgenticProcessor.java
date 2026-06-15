@@ -21,7 +21,6 @@ import io.dapr.quarkus.langchain4j.durable.AgentMethodMeta;
 import io.dapr.quarkus.langchain4j.durable.ConditionalBranch;
 import io.dapr.quarkus.langchain4j.durable.DurableAgentProxyRecorder;
 import io.dapr.quarkus.langchain4j.durable.OutputCombiner;
-import io.dapr.quarkus.langchain4j.durable.SubAgentSpec;
 import io.dapr.quarkus.langchain4j.workflow.DaprWorkflowRuntimeRecorder;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.AnnotationsTransformerBuildItem;
@@ -579,10 +578,14 @@ public class DaprAgenticProcessor {
     List<String> varNames = orderedParamNames(method);
 
     if (annotation.equals(AGENT_ANNOTATION)) {
+      // outputKey matters when this leaf is a sub-agent (its result is stored under it in the
+      // parent's state); harmless for a top-level leaf (the handler reads the workflow's text).
       return new AgentMethodMeta(workflowName, extractAgentName(method),
           extractAnnotationText(method, USER_MESSAGE_ANNOTATION),
           extractAnnotationText(method, SYSTEM_MESSAGE_ANNOTATION),
-          varNames, List.of(), null, 0, List.of(), null);
+          varNames, List.of(),
+          stringValueOrNull(method.annotation(AGENT_ANNOTATION), "outputKey"),
+          0, List.of(), null);
     }
 
     AnnotationInstance composite = method.annotation(annotation);
@@ -616,32 +619,46 @@ public class DaprAgenticProcessor {
     return null;
   }
 
-  private List<SubAgentSpec> resolveSubAgents(IndexView index, AnnotationInstance composite) {
-    List<SubAgentSpec> specs = new ArrayList<>();
+  private List<AgentMethodMeta> resolveSubAgents(IndexView index, AnnotationInstance composite) {
+    List<AgentMethodMeta> nodes = new ArrayList<>();
     AnnotationValue subAgentsValue = composite.value("subAgents");
     if (subAgentsValue == null) {
-      return specs;
+      return nodes;
     }
     for (Type subType : subAgentsValue.asClassArray()) {
-      SubAgentSpec spec = resolveSubAgentSpec(index, subType);
-      if (spec != null) {
-        specs.add(spec);
+      AgentMethodMeta node = resolveSubAgentNode(index, subType);
+      if (node != null) {
+        nodes.add(node);
       }
     }
-    return specs;
+    return nodes;
   }
 
-  private SubAgentSpec resolveSubAgentSpec(IndexView index, Type subType) {
+  /**
+   * Resolves a sub-agent class to a recursive {@link AgentMethodMeta} node — a leaf {@code @Agent}
+   * or a nested composite ({@code @SequenceAgent}/{@code @ParallelAgent}/{@code @LoopAgent}/
+   * {@code @ConditionalAgent}), recursing through {@link #buildAgentMethodMeta}.
+   */
+  private AgentMethodMeta resolveSubAgentNode(IndexView index, Type subType) {
     ClassInfo subInterface = index.getClassByName(subType.name());
     if (subInterface == null) {
       return null;
     }
     for (MethodInfo subMethod : subInterface.methods()) {
       if (subMethod.hasAnnotation(AGENT_ANNOTATION)) {
-        String subOutputKey = stringValueOrNull(subMethod.annotation(AGENT_ANNOTATION), "outputKey");
-        return new SubAgentSpec(extractAgentName(subMethod),
-            extractAnnotationText(subMethod, USER_MESSAGE_ANNOTATION),
-            subOutputKey != null ? subOutputKey : "output");
+        return buildAgentMethodMeta(index, subMethod, AGENT_ANNOTATION, "react-agent");
+      }
+      if (subMethod.hasAnnotation(SEQUENCE_AGENT_ANNOTATION)) {
+        return buildAgentMethodMeta(index, subMethod, SEQUENCE_AGENT_ANNOTATION, "durable-sequence");
+      }
+      if (subMethod.hasAnnotation(PARALLEL_AGENT_ANNOTATION)) {
+        return buildAgentMethodMeta(index, subMethod, PARALLEL_AGENT_ANNOTATION, "durable-parallel");
+      }
+      if (subMethod.hasAnnotation(LOOP_AGENT_ANNOTATION)) {
+        return buildAgentMethodMeta(index, subMethod, LOOP_AGENT_ANNOTATION, "durable-loop");
+      }
+      if (subMethod.hasAnnotation(CONDITIONAL_AGENT_ANNOTATION)) {
+        return buildAgentMethodMeta(index, subMethod, CONDITIONAL_AGENT_ANNOTATION, "durable-conditional");
       }
     }
     return null;
@@ -655,16 +672,16 @@ public class DaprAgenticProcessor {
       return branches;
     }
     for (Type subType : subAgentsValue.asClassArray()) {
-      SubAgentSpec spec = resolveSubAgentSpec(index, subType);
-      if (spec == null) {
+      AgentMethodMeta node = resolveSubAgentNode(index, subType);
+      if (node == null) {
         continue;
       }
       MethodInfo condition = findActivationCondition(router, subType.name());
       if (condition != null) {
-        branches.add(new ConditionalBranch(spec, router.name().toString(),
+        branches.add(new ConditionalBranch(node, router.name().toString(),
             condition.name(), orderedParamNames(condition)));
       } else {
-        branches.add(new ConditionalBranch(spec, null, null, List.of()));
+        branches.add(new ConditionalBranch(node, null, null, List.of()));
       }
     }
     return branches;

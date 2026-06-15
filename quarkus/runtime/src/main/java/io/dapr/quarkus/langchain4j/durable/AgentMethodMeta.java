@@ -22,6 +22,10 @@ import java.util.List;
  * <p>Recorder-serializable (record + Strings/ints/Lists), so it can be passed through a
  * {@code @Recorder} into the synthetic bean that replaces the AiServices-built agent.
  *
+ * <p>This is a <b>recursive node</b>: {@code subAgents} (and {@code branches}) hold child
+ * {@code AgentMethodMeta}s, so a composite can be another composite's sub-agent. A leaf node has
+ * {@code workflowName == "react-agent"} and empty {@code subAgents}/{@code branches}.
+ *
  * @param workflowName  target workflow: {@code react-agent} (leaf) or {@code durable-sequence}
  *                      / {@code durable-parallel} / {@code durable-loop} (composite)
  * @param agentName     agent name (leaf) or composite name; also used to name the run
@@ -29,8 +33,8 @@ import java.util.List;
  * @param systemTemplate leaf {@code @SystemMessage} template, or {@code null}
  * @param varNames      method parameter names in order (the {@code @V} names), for
  *                      {@code {{var}}} substitution / initial state
- * @param subAgents     composite sub-agent steps (empty for a leaf or conditional)
- * @param outputKey     composite output key to return (or {@code null})
+ * @param subAgents     child nodes (leaf or composite), empty for a leaf or conditional
+ * @param outputKey     state key this node's result is stored under (in its parent's state)
  * @param maxIterations loop iteration count (0 if not a loop)
  * @param branches      conditional branches (empty unless a conditional composite)
  * @param combiner      optional {@code @Output} combiner for the composite result, or {@code null}
@@ -41,7 +45,7 @@ public record AgentMethodMeta(
     String userTemplate,
     String systemTemplate,
     List<String> varNames,
-    List<SubAgentSpec> subAgents,
+    List<AgentMethodMeta> subAgents,
     String outputKey,
     int maxIterations,
     List<ConditionalBranch> branches,

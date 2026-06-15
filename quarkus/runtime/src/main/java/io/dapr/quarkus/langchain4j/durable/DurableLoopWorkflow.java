@@ -33,29 +33,22 @@ import java.util.Map;
 @WorkflowMetadata(name = "durable-loop")
 public class DurableLoopWorkflow implements Workflow {
 
-  private static final int CHILD_MAX_STEPS = 16;
-
   @Override
   public WorkflowStub create() {
     return ctx -> {
       DurableLoopInput input = ctx.getInput(DurableLoopInput.class);
-
       Map<String, String> state = new HashMap<>(input.initialState());
-      String lastOutput = null;
       int iterations = input.maxIterations() > 0 ? input.maxIterations() : 1;
 
       for (int iteration = 0; iteration < iterations; iteration++) {
-        for (SubAgentSpec spec : input.subAgents()) {
-          String userMessage = DurableRendering.render(spec.userMessageTemplate(), state);
-          String output = ctx.callChildWorkflow("react-agent",
-              new ReActInput(spec.agentName(), null, userMessage, null, CHILD_MAX_STEPS),
-              String.class).await();
-          state.put(spec.outputKey(), output);
-          lastOutput = output;
-        }
+        DurableChildren.runSequential(ctx, input.subAgents(), state);
       }
 
-      ctx.complete(DurableOutput.resolve(input.combiner(), input.finalOutputKey(), state, lastOutput));
+      String result = DurableOutput.resolve(input.combiner(), input.finalOutputKey(), state, null);
+      if (input.finalOutputKey() != null && result != null) {
+        state.put(input.finalOutputKey(), result);
+      }
+      ctx.complete(state);
     };
   }
 }

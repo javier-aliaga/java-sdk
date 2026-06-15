@@ -13,53 +13,39 @@ limitations under the License.
 
 package io.dapr.quarkus.langchain4j.durable;
 
-import io.dapr.durabletask.Task;
 import io.dapr.workflows.Workflow;
 import io.dapr.workflows.WorkflowStub;
 import io.quarkiverse.dapr.workflows.WorkflowMetadata;
 import jakarta.enterprise.context.ApplicationScoped;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
- * Durable parallel composite: runs all sub-agents concurrently as {@code react-agent} child
- * workflows from the same seed state, then collects each output under its state key.
+ * Durable parallel composite: runs all sub-agents concurrently as child workflows from the same
+ * seed state, then merges each result (leaf output under its key; a nested composite's whole state)
+ * and applies the optional {@code @Output} combiner.
  *
- * <p>Control-inversion replacement for {@code ParallelOrchestrationWorkflow}. Fan-out uses
- * {@link io.dapr.workflows.WorkflowContext#allOf}; the children land on whatever replicas
- * Dapr chooses, which is safe because each is a self-contained durable workflow. Reuses
- * {@link DurableSequenceInput} (sub-agents are independent here — no state threading).
+ * <p>Control-inversion replacement for {@code ParallelOrchestrationWorkflow}; reuses
+ * {@link DurableSequenceInput} (sub-agents are independent here — no inter-step threading).
  */
 @ApplicationScoped
 @WorkflowMetadata(name = "durable-parallel")
 public class DurableParallelWorkflow implements Workflow {
 
-  private static final int CHILD_MAX_STEPS = 16;
-
   @Override
   public WorkflowStub create() {
     return ctx -> {
       DurableSequenceInput input = ctx.getInput(DurableSequenceInput.class);
-
-      List<Task<String>> tasks = new ArrayList<>();
-      for (SubAgentSpec spec : input.subAgents()) {
-        String userMessage = DurableRendering.render(spec.userMessageTemplate(), input.initialState());
-        tasks.add(ctx.callChildWorkflow("react-agent",
-            new ReActInput(spec.agentName(), null, userMessage, null, CHILD_MAX_STEPS), String.class));
-      }
-
-      List<String> outputs = ctx.allOf(tasks).await();
-
       Map<String, String> state = new HashMap<>(input.initialState());
-      for (int i = 0; i < input.subAgents().size(); i++) {
-        state.put(input.subAgents().get(i).outputKey(), outputs.get(i));
-      }
 
-      String fallback = String.join("\n\n", outputs);
-      ctx.complete(DurableOutput.resolve(input.combiner(), input.finalOutputKey(), state, fallback));
+      DurableChildren.runParallel(ctx, input.subAgents(), state);
+
+      String result = DurableOutput.resolve(input.combiner(), input.finalOutputKey(), state, null);
+      if (input.finalOutputKey() != null && result != null) {
+        state.put(input.finalOutputKey(), result);
+      }
+      ctx.complete(state);
     };
   }
 }

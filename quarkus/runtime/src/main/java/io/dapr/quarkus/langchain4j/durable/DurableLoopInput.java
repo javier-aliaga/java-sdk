@@ -26,7 +26,7 @@ import java.util.Map;
  * @param combiner       optional {@code @Output} combiner producing the result; {@code null} if none
  */
 public record DurableLoopInput(
-    List<SubAgentSpec> subAgents,
+    List<AgentMethodMeta> subAgents,
     Map<String, String> initialState,
     String finalOutputKey,
     int maxIterations,

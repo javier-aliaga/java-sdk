@@ -13,7 +13,6 @@ limitations under the License.
 
 package io.dapr.quarkus.langchain4j.durable;
 
-import io.dapr.durabletask.Task;
 import io.dapr.workflows.Workflow;
 import io.dapr.workflows.WorkflowStub;
 import io.quarkiverse.dapr.workflows.WorkflowMetadata;
@@ -41,7 +40,6 @@ import java.util.Map;
 public class DurableConditionalWorkflow implements Workflow {
 
   private static final Logger LOG = Logger.getLogger(DurableConditionalWorkflow.class);
-  private static final int CHILD_MAX_STEPS = 16;
 
   @Override
   public WorkflowStub create() {
@@ -49,34 +47,21 @@ public class DurableConditionalWorkflow implements Workflow {
       DurableConditionalInput input = ctx.getInput(DurableConditionalInput.class);
       Map<String, String> state = new HashMap<>(input.initialState());
 
-      // Select every branch whose activation condition holds (LangChain4j semantics).
-      List<SubAgentSpec> selected = new ArrayList<>();
+      // Select every branch whose activation condition holds (LangChain4j semantics), then run
+      // the matching sub-agents concurrently — merging leaf outputs and nested composite states.
+      List<AgentMethodMeta> selected = new ArrayList<>();
       for (ConditionalBranch branch : input.branches()) {
         if (matches(branch, state)) {
           selected.add(branch.agent());
         }
       }
+      DurableChildren.runParallel(ctx, selected, state);
 
-      if (selected.isEmpty()) {
-        ctx.complete(DurableOutput.resolve(input.combiner(), input.finalOutputKey(), state, null));
-        return;
+      String result = DurableOutput.resolve(input.combiner(), input.finalOutputKey(), state, null);
+      if (input.finalOutputKey() != null && result != null) {
+        state.put(input.finalOutputKey(), result);
       }
-
-      // Run the matching sub-agents concurrently as react-agent children.
-      List<Task<String>> tasks = new ArrayList<>();
-      for (SubAgentSpec agent : selected) {
-        String userMessage = DurableRendering.render(agent.userMessageTemplate(), state);
-        tasks.add(ctx.callChildWorkflow("react-agent",
-            new ReActInput(agent.agentName(), null, userMessage, null, CHILD_MAX_STEPS),
-            String.class));
-      }
-      List<String> outputs = ctx.allOf(tasks).await();
-      for (int i = 0; i < selected.size(); i++) {
-        state.put(selected.get(i).outputKey(), outputs.get(i));
-      }
-
-      String fallback = outputs.get(outputs.size() - 1);
-      ctx.complete(DurableOutput.resolve(input.combiner(), input.finalOutputKey(), state, fallback));
+      ctx.complete(state);
     };
   }
 

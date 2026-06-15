@@ -13,6 +13,9 @@ limitations under the License.
 
 package io.dapr.quarkus.langchain4j.durable;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.lang.reflect.Method;
 import java.util.Map;
 
@@ -26,27 +29,44 @@ import java.util.Map;
  */
 final class DurableOutput {
 
+  private static final ObjectMapper MAPPER = new ObjectMapper();
+
   private DurableOutput() {
   }
 
   /**
-   * Computes the composite result.
+   * Computes the composite result as a String (a structured {@code @Output} record is serialized to
+   * JSON so it can live in the state map; the proxy deserializes it back at the boundary).
    *
    * @param combiner   the {@code @Output} reference, or {@code null}
    * @param outputKey  the composite output key (used when there is no combiner)
    * @param state      the accumulated sub-agent outputs (by scope key)
    * @param fallback   value to return when neither combiner nor outputKey yields a result
-   * @return the composite result (a String or a structured object from {@code @Output})
+   * @return the composite result as a String, or {@code null}
    */
-  static Object resolve(OutputCombiner combiner, String outputKey,
+  static String resolve(OutputCombiner combiner, String outputKey,
       Map<String, String> state, String fallback) {
     if (combiner != null) {
-      return invoke(combiner, state);
+      return asString(invoke(combiner, state));
     }
-    if (outputKey != null) {
+    if (outputKey != null && state.get(outputKey) != null) {
       return state.get(outputKey);
     }
     return fallback;
+  }
+
+  private static String asString(Object value) {
+    if (value == null) {
+      return null;
+    }
+    if (value instanceof String s) {
+      return s;
+    }
+    try {
+      return MAPPER.writeValueAsString(value);
+    } catch (JsonProcessingException e) {
+      return String.valueOf(value);
+    }
   }
 
   private static Object invoke(OutputCombiner combiner, Map<String, String> state) {
