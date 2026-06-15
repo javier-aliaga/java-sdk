@@ -50,7 +50,7 @@ public class DurableSequenceWorkflow implements Workflow {
       String lastOutput = null;
 
       for (SubAgentSpec spec : input.subAgents()) {
-        String userMessage = render(spec.userMessageTemplate(), state);
+        String userMessage = DurableRendering.render(spec.userMessageTemplate(), state);
         ReActInput childInput = new ReActInput(
             spec.agentName(), null, userMessage, null, CHILD_MAX_STEPS);
 
@@ -65,21 +65,5 @@ public class DurableSequenceWorkflow implements Workflow {
           ? state.get(input.finalOutputKey()) : lastOutput;
       ctx.complete(result);
     };
-  }
-
-  /**
-   * Substitutes {@code {{key}}} placeholders in the template from the accumulated state.
-   */
-  private static String render(String template, Map<String, String> state) {
-    if (template == null) {
-      return null;
-    }
-    String rendered = template;
-    for (Map.Entry<String, String> entry : state.entrySet()) {
-      if (entry.getValue() != null) {
-        rendered = rendered.replace("{{" + entry.getKey() + "}}", entry.getValue());
-      }
-    }
-    return rendered;
   }
 }
