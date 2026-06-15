@@ -81,8 +81,13 @@ public class DurableAgentInvocationHandler implements InvocationHandler {
     try {
       WorkflowInstanceStatus status =
           client.waitForInstanceCompletion(instanceId, Duration.ofMinutes(WAIT_MINUTES), true);
-      String result = status.readOutputAs(String.class);
-      return method.getReturnType() == void.class ? null : result;
+      Class<?> returnType = method.getReturnType();
+      if (returnType == void.class || returnType == Void.class) {
+        return null;
+      }
+      // Read the workflow output as the method's actual return type — handles @Output combiners
+      // that return a structured record as well as plain String agents.
+      return status.readOutputAs(returnType);
     } catch (TimeoutException e) {
       throw new IllegalStateException(
           "Durable agent '" + meta.agentName() + "' did not complete within " + WAIT_MINUTES + "m", e);
@@ -98,11 +103,11 @@ public class DurableAgentInvocationHandler implements InvocationHandler {
           null,
           LEAF_MAX_STEPS);
       case "durable-sequence", "durable-parallel" -> new DurableSequenceInput(
-          meta.subAgents(), state, meta.outputKey());
+          meta.subAgents(), state, meta.outputKey(), meta.combiner());
       case "durable-loop" -> new DurableLoopInput(
-          meta.subAgents(), state, meta.outputKey(), meta.maxIterations());
+          meta.subAgents(), state, meta.outputKey(), meta.maxIterations(), meta.combiner());
       case "durable-conditional" -> new DurableConditionalInput(
-          meta.branches(), state, meta.outputKey());
+          meta.branches(), state, meta.outputKey(), meta.combiner());
       default -> throw new IllegalStateException("Unsupported durable workflow: " + meta.workflowName());
     };
   }

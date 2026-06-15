@@ -25,9 +25,11 @@ import java.util.Map;
  * @param branches       the candidate branches, in declaration order
  * @param initialState   seed state for condition evaluation and template rendering
  * @param finalOutputKey state key to return; {@code null} returns the chosen agent's output
+ * @param combiner       optional {@code @Output} combiner producing the result; {@code null} if none
  */
 public record DurableConditionalInput(
     List<ConditionalBranch> branches,
     Map<String, String> initialState,
-    String finalOutputKey) {
+    String finalOutputKey,
+    OutputCombiner combiner) {
 }

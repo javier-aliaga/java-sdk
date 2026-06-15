@@ -58,7 +58,7 @@ public class DurableConditionalWorkflow implements Workflow {
       }
 
       if (selected.isEmpty()) {
-        ctx.complete(input.finalOutputKey() != null ? state.get(input.finalOutputKey()) : null);
+        ctx.complete(DurableOutput.resolve(input.combiner(), input.finalOutputKey(), state, null));
         return;
       }
 
@@ -75,9 +75,8 @@ public class DurableConditionalWorkflow implements Workflow {
         state.put(selected.get(i).outputKey(), outputs.get(i));
       }
 
-      String result = input.finalOutputKey() != null
-          ? state.get(input.finalOutputKey()) : outputs.get(outputs.size() - 1);
-      ctx.complete(result);
+      String fallback = outputs.get(outputs.size() - 1);
+      ctx.complete(DurableOutput.resolve(input.combiner(), input.finalOutputKey(), state, fallback));
     };
   }
 

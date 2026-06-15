@@ -58,9 +58,8 @@ public class DurableParallelWorkflow implements Workflow {
         state.put(input.subAgents().get(i).outputKey(), outputs.get(i));
       }
 
-      String result = input.finalOutputKey() != null
-          ? state.get(input.finalOutputKey()) : String.join("\n\n", outputs);
-      ctx.complete(result);
+      String fallback = String.join("\n\n", outputs);
+      ctx.complete(DurableOutput.resolve(input.combiner(), input.finalOutputKey(), state, fallback));
     };
   }
 }

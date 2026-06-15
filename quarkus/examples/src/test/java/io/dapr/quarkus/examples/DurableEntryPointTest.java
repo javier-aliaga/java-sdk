@@ -2,6 +2,7 @@ package io.dapr.quarkus.examples;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import jakarta.inject.Inject;
 
@@ -37,6 +38,9 @@ class DurableEntryPointTest {
     @Inject
     StoryRouter storyRouter;
 
+    @Inject
+    ResearchAndWrite researchAndWrite;
+
     @Test
     void leafAgentRunsAsReactAgentWorkflow() {
         String story = creativeWriter.generateStory("dragons");
@@ -56,5 +60,14 @@ class DurableEntryPointTest {
         String story = storyRouter.route("dragons");
         assertNotNull(story);
         assertFalse(story.isBlank(), "expected the durable-conditional workflow to return a story");
+    }
+
+    @Test
+    void parallelWithOutputCombinerProducesCombinedResult() {
+        String combined = researchAndWrite.run("dragons", "France");
+        assertNotNull(combined);
+        // The @Output combiner ran over both sub-agents' scope outputs (not an empty outputKey).
+        assertTrue(combined.contains("STORY:") && combined.contains("RESEARCH:"),
+                "expected the @Output combiner to merge both sub-agent outputs, got: " + combined);
     }
 }

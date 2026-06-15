@@ -55,9 +55,7 @@ public class DurableLoopWorkflow implements Workflow {
         }
       }
 
-      String result = input.finalOutputKey() != null
-          ? state.get(input.finalOutputKey()) : lastOutput;
-      ctx.complete(result);
+      ctx.complete(DurableOutput.resolve(input.combiner(), input.finalOutputKey(), state, lastOutput));
     };
   }
 }

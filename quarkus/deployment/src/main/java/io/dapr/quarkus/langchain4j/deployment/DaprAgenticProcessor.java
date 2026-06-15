@@ -20,6 +20,7 @@ import io.dapr.quarkus.langchain4j.agent.DaprAgentMetadataHolder;
 import io.dapr.quarkus.langchain4j.durable.AgentMethodMeta;
 import io.dapr.quarkus.langchain4j.durable.ConditionalBranch;
 import io.dapr.quarkus.langchain4j.durable.DurableAgentProxyRecorder;
+import io.dapr.quarkus.langchain4j.durable.OutputCombiner;
 import io.dapr.quarkus.langchain4j.durable.SubAgentSpec;
 import io.dapr.quarkus.langchain4j.workflow.DaprWorkflowRuntimeRecorder;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
@@ -183,6 +184,8 @@ public class DaprAgenticProcessor {
       DotName.createSimple("dev.langchain4j.agentic.declarative.ConditionalAgent");
   private static final DotName ACTIVATION_CONDITION_ANNOTATION =
       DotName.createSimple("dev.langchain4j.agentic.declarative.ActivationCondition");
+  private static final DotName OUTPUT_ANNOTATION =
+      DotName.createSimple("dev.langchain4j.agentic.declarative.Output");
 
   private static final String ORCH_PKG =
       "io.dapr.quarkus.langchain4j.workflow.orchestration.";
@@ -579,7 +582,7 @@ public class DaprAgenticProcessor {
       return new AgentMethodMeta(workflowName, extractAgentName(method),
           extractAnnotationText(method, USER_MESSAGE_ANNOTATION),
           extractAnnotationText(method, SYSTEM_MESSAGE_ANNOTATION),
-          varNames, List.of(), null, 0, List.of());
+          varNames, List.of(), null, 0, List.of(), null);
     }
 
     AnnotationInstance composite = method.annotation(annotation);
@@ -588,15 +591,29 @@ public class DaprAgenticProcessor {
       name = method.declaringClass().name().withoutPackagePrefix() + "." + method.name();
     }
     String outputKey = stringValueOrNull(composite, "outputKey");
+    OutputCombiner combiner = resolveOutputCombiner(method.declaringClass());
 
     if (annotation.equals(CONDITIONAL_AGENT_ANNOTATION)) {
       return new AgentMethodMeta(workflowName, name, null, null, varNames, List.of(), outputKey, 0,
-          resolveConditionalBranches(index, composite, method.declaringClass()));
+          resolveConditionalBranches(index, composite, method.declaringClass()), combiner);
     }
 
     int maxIterations = annotation.equals(LOOP_AGENT_ANNOTATION) ? intValueOrDefault(composite, 2) : 0;
     return new AgentMethodMeta(workflowName, name, null, null, varNames,
-        resolveSubAgents(index, composite), outputKey, maxIterations, List.of());
+        resolveSubAgents(index, composite), outputKey, maxIterations, List.of(), combiner);
+  }
+
+  private OutputCombiner resolveOutputCombiner(ClassInfo agentInterface) {
+    for (MethodInfo method : agentInterface.methods()) {
+      if (method.hasAnnotation(OUTPUT_ANNOTATION)) {
+        List<String> paramNames = new ArrayList<>();
+        for (int i = 0; i < method.parametersCount(); i++) {
+          paramNames.add(method.parameterName(i));
+        }
+        return new OutputCombiner(agentInterface.name().toString(), method.name(), paramNames);
+      }
+    }
+    return null;
   }
 
   private List<SubAgentSpec> resolveSubAgents(IndexView index, AnnotationInstance composite) {

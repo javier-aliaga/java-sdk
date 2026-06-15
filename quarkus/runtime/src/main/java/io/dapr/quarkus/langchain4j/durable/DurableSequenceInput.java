@@ -23,9 +23,11 @@ import java.util.Map;
  * @param initialState   seed state (e.g. the request arguments) for template rendering
  * @param finalOutputKey state key to return as the composite result; {@code null} returns the
  *                       last step's output
+ * @param combiner       optional {@code @Output} combiner producing the result; {@code null} if none
  */
 public record DurableSequenceInput(
     List<SubAgentSpec> subAgents,
     Map<String, String> initialState,
-    String finalOutputKey) {
+    String finalOutputKey,
+    OutputCombiner combiner) {
 }

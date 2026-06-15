@@ -100,7 +100,7 @@ public class DurableAgentResource {
                 "You are a style editor. Improve the style of this story: {{story}}. "
                     + "Return only the improved story.", "story")),
         Map.of("topic", topic),
-        "story");
+        "story", null);
 
     String instanceId = "durable-sequence-" + UUID.randomUUID();
     workflowClient.scheduleNewWorkflow("durable-sequence", input, instanceId);
@@ -129,7 +129,7 @@ public class DurableAgentResource {
             new SubAgentSpec("style-editor-agent",
                 "Write a fancy 3-sentence story about {{topic}}. Return only the story.", "fancy")),
         Map.of("topic", topic),
-        null);
+        null, null);
     return runComposite("durable-parallel", "durable-parallel-", input);
   }
 
@@ -152,7 +152,7 @@ public class DurableAgentResource {
                 + "Return only the story.", "story")),
         Map.of("topic", topic),
         "story",
-        iterations);
+        iterations, null);
     return runComposite("durable-loop", "durable-loop-", input);
   }
 

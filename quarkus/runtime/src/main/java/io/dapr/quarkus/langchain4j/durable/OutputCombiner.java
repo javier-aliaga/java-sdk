@@ -14,21 +14,14 @@ limitations under the License.
 package io.dapr.quarkus.langchain4j.durable;
 
 import java.util.List;
-import java.util.Map;
 
 /**
- * Input to {@link DurableLoopWorkflow}.
+ * Reference to a composite's static {@code @Output} method, which combines sub-agent outputs
+ * (matched from scope by parameter name) into the composite's result.
  *
- * @param subAgents      the steps run, in order, every iteration
- * @param initialState   seed state for template rendering
- * @param finalOutputKey state key to return; {@code null} returns the last step's output
- * @param maxIterations  how many times to run the sequence
- * @param combiner       optional {@code @Output} combiner producing the result; {@code null} if none
+ * @param declaringClass FQCN declaring the {@code @Output} method
+ * @param methodName     the static method name
+ * @param paramNames     the method's parameter names, in order (each a scope key to read)
  */
-public record DurableLoopInput(
-    List<SubAgentSpec> subAgents,
-    Map<String, String> initialState,
-    String finalOutputKey,
-    int maxIterations,
-    OutputCombiner combiner) {
+public record OutputCombiner(String declaringClass, String methodName, List<String> paramNames) {
 }

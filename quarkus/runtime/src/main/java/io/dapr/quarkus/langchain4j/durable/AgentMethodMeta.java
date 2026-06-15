@@ -33,6 +33,7 @@ import java.util.List;
  * @param outputKey     composite output key to return (or {@code null})
  * @param maxIterations loop iteration count (0 if not a loop)
  * @param branches      conditional branches (empty unless a conditional composite)
+ * @param combiner      optional {@code @Output} combiner for the composite result, or {@code null}
  */
 public record AgentMethodMeta(
     String workflowName,
@@ -43,5 +44,6 @@ public record AgentMethodMeta(
     List<SubAgentSpec> subAgents,
     String outputKey,
     int maxIterations,
-    List<ConditionalBranch> branches) {
+    List<ConditionalBranch> branches,
+    OutputCombiner combiner) {
 }
