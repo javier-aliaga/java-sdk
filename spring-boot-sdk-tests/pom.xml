@@ -198,4 +198,18 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <profile>
+      <id>custom-spring-boot-version</id>
+      <activation>
+        <property>
+          <name>env.PRODUCT_SPRING_BOOT_VERSION</name>
+        </property>
+      </activation>
+      <properties>
+        <springboot4.version>${env.PRODUCT_SPRING_BOOT_VERSION}</springboot4.version>
+      </properties>
+    </profile>
+  </profiles>
 </project>

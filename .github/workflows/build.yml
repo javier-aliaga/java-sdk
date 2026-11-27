@@ -118,6 +118,15 @@ jobs:
         spring-boot-version: [ 4.0.5 ]
         spring-boot-display-version: [ 4.0.x ]
         experimental: [ false ]
+        include:
+          - java: 17
+            spring-boot-version: 4.2.0
+            spring-boot-display-version: 4.2.x
+            experimental: true
+          - java: 25
+            spring-boot-version: 4.2.0
+            spring-boot-display-version: 4.2.x
+            experimental: true
     env:
       JDK_VER: ${{ matrix.java }}
     steps:
