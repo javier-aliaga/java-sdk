@@ -449,6 +449,7 @@
       </activation>
       <properties>
         <springboot.version>${env.PRODUCT_SPRING_BOOT_VERSION}</springboot.version>
+        <springboot4.version>${env.PRODUCT_SPRING_BOOT_VERSION}</springboot4.version>
       </properties>
     </profile>
 
